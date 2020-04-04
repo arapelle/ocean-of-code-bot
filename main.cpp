@@ -229,31 +229,30 @@ struct Tool
     bool is_ready() const { return cooldown == 0; }
 };
 
-struct Player_info
+class Player_info
 {
-    int id = -1;
+public:
+    inline static constexpr std::size_t max_history_size = 5;
+
     struct Status
     {
         Position position;
         int hp = -1;
-        Tool torpedo;
-        Tool sonar;
-        Tool silence;
-        Tool mine;
-    } status;
+    };
+
+    int id = -1;
+    Status status;
     std::deque<Status> history_status;
 
+    const Position& position() const { return status.position; }
     Position& position() { return status.position; }
+    const int& hp() const { return status.hp; }
     int& hp() { return status.hp; }
-    Tool& torpedo() { return status.torpedo; }
-    Tool& sonar() { return status.sonar; }
-    Tool& silence() { return status.silence; }
-    Tool& mine() { return status.mine; }
 
     const Status& previous_status() const { return history_status.back(); }
     void save_status()
     {
-        while (history_status.size() >= 5)
+        while (history_status.size() >= max_history_size)
             history_status.pop_front();
         history_status.push_back(status);
     }
@@ -262,6 +261,37 @@ struct Player_info
     {
         return stream >> info.id;
     }
+};
+
+class Opponent : public Player_info
+{
+public:
+
+private:
+};
+
+class Avatar : public Player_info
+{
+public:
+    struct Toolkit
+    {
+        Tool torpedo;
+        Tool sonar;
+        Tool silence;
+        Tool mine;
+    };
+
+    Toolkit toolkit;
+    const Tool& torpedo() const { return toolkit.torpedo; }
+    Tool& torpedo() { return toolkit.torpedo; }
+    const Tool& sonar() const { return toolkit.sonar; }
+    Tool& sonar() { return toolkit.sonar; }
+    const Tool& silence() const { return toolkit.silence; }
+    Tool& silence() { return toolkit.silence; }
+    const Tool& mine() const { return toolkit.mine; }
+    Tool& mine() { return toolkit.mine; }
+
+private:
 };
 
 class Game
@@ -311,12 +341,12 @@ public:
     {
         dstrm_ << turn_info << std::endl;
         avatar_.save_status();
-        avatar_.status.position = Position(turn_info.x, turn_info.y);
-        avatar_.status.hp = turn_info.myLife;
-        avatar_.status.torpedo.cooldown = turn_info.torpedoCooldown;
-        avatar_.status.sonar.cooldown = turn_info.sonarCooldown;
-        avatar_.status.silence.cooldown = turn_info.silenceCooldown;
-        avatar_.status.mine.cooldown = turn_info.mineCooldown;
+        avatar_.position() = Position(turn_info.x, turn_info.y);
+        avatar_.hp() = turn_info.myLife;
+        avatar_.torpedo().cooldown = turn_info.torpedoCooldown;
+        avatar_.sonar().cooldown = turn_info.sonarCooldown;
+        avatar_.silence().cooldown = turn_info.silenceCooldown;
+        avatar_.mine().cooldown = turn_info.mineCooldown;
         opponent_.save_status();
         opponent_.status.hp = turn_info.oppLife;
     }
@@ -359,8 +389,8 @@ public:
 private:
     Game_info game_info_;
     Map map_;
-    Player_info avatar_;
-    Player_info opponent_;
+    Avatar avatar_;
+    Opponent opponent_;
 
     std::istream& istrm_;
     std::ostream& ostrm_;
