@@ -23,13 +23,18 @@ struct Game_info
 
 enum Direction : char
 {
-    North = 'N',
-    East = 'E',
-    South = 'S',
-    West = 'W',
+    North,
+    East,
+    South,
+    West,
     Undefined = '?',
     Bad = '%',
 };
+
+
+std::size_t number_of_directions() { return 4; }
+
+bool dir_is_valid(Direction dir) { return unsigned(dir) < number_of_directions(); }
 
 std::string dir_to_string(Direction dir)
 {
@@ -91,13 +96,13 @@ public:
         case North: --y; break;
         case East: ++x; break;
         case South: ++y; break;
-        case West: ++x; break;
+        case West: --x; break;
         default: std::cerr << "ERR: Bad Move" << std::endl;
         }
         return *this;
     }
 
-    Vec2 neighbour(Direction dir) { Vec2 vec(*this); vec.move(dir); return vec; }
+    Vec2 neighbour(Direction dir) const { Vec2 vec(*this); vec.move(dir); return vec; }
 
     friend std::ostream& operator<<(std::ostream& stream, const Vec2& vec)
     {
@@ -109,18 +114,18 @@ using Position = Vec2;
 
 struct Square
 {
-    Square() = default;
+    Square() {}
     explicit Square(char type) : value_(type) {}
     char type() const { return value_; }
     void set_type(char type) { value_ = type; }
     bool is_ocean() const { return value_ == '.'; }
-    bool is_visited(int actor_id) const { return visited_mask_ | (1<<actor_id); }
+    bool is_visited(int actor_id) const { return visited_mask_ & (1<<actor_id); }
     void set_visited(int actor_id) { visited_mask_ |= (1<<actor_id); }
     void unset_visited(int actor_id) { visited_mask_ &= ~(1<<actor_id); }
 
 private:
     char value_ = '?';
-    uint64_t visited_mask_ = false;
+    uint64_t visited_mask_ = 0;
 };
 
 class Map
@@ -148,6 +153,13 @@ public:
 
     void clear() { width_ = 0; height_ = 0; grid_.clear(); }
 
+    void clear_visit(int actor_id)
+    {
+        for (auto& row : grid_)
+            for (auto& square : row)
+                square.unset_visited(actor_id);
+    }
+
     void resize(int width, int height)
     {
         width_ = width;
@@ -155,6 +167,35 @@ public:
         grid_.resize(height_);
         for (auto& row : grid_)
             row.resize(width_);
+    }
+
+    bool contains(const Position& pos) const
+    {
+        return pos.x >= 0 && pos.x < width_ && pos.y >= 0 && pos.y < height_;
+    }
+
+    std::size_t accessibility(const Position& pos, int actor_id) const
+    {
+        std::size_t res = 0;
+        const Square& square = get(pos);
+        if (square.is_ocean() && !square.is_visited(actor_id))
+        {
+            std::cerr << "** acc.pos: " << pos << std::endl;
+            for (unsigned dir = 0; dir < number_of_directions(); ++dir)
+            {
+                Position npos = pos.neighbour(Direction(dir));
+                if (contains(npos))
+                {
+                    std::cerr << "** acc.npos: " << npos << std::endl;
+                    const Square& nsquare = get(npos);
+                    std::cerr << "** acc.npos.is_visited: " << nsquare.is_visited(actor_id) << std::endl;
+                    std::cerr << "** acc.npos.is_ocean: " << nsquare.is_ocean() << std::endl;
+                    if (!nsquare.is_visited(actor_id) && nsquare.is_ocean())
+                        ++res;
+                }
+            }
+        }
+        return res;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, const Map& map)
@@ -342,6 +383,7 @@ public:
         dstrm_ << turn_info << std::endl;
         avatar_.save_status();
         avatar_.position() = Position(turn_info.x, turn_info.y);
+        map_.get(avatar_.position()).set_visited(avatar_.id);
         avatar_.hp() = turn_info.myLife;
         avatar_.torpedo().cooldown = turn_info.torpedoCooldown;
         avatar_.sonar().cooldown = turn_info.sonarCooldown;
@@ -352,17 +394,43 @@ public:
     }
 
     // ia:
-    Direction move_direction(const Turn_info& turn_info)
+    Direction move_direction()
     {
-        Position pos = Position(turn_info.x, turn_info.y);
-
-        return West;
+        Position pos = avatar_.position();
+        std::vector<std::vector<Direction>> tdirs(number_of_directions() + 1);
+        for (unsigned i = 0; i < number_of_directions(); ++i)
+        {
+            Direction dir = Direction(i);
+            Position npos = pos.neighbour(dir);
+            dstrm_ << "** npos: " << npos << std::endl;
+            if (map_.contains(npos))
+            {
+                std::size_t acc = map_.accessibility(npos, avatar_.id);
+                dstrm_ << "** acc: " << acc << std::endl;
+                tdirs[acc].push_back(dir);
+            }
+        }
+        unsigned max_acc = number_of_directions();
+        for (; max_acc > 0; --max_acc)
+            if (!tdirs[max_acc].empty())
+                break;
+        if (max_acc > 0)
+            return tdirs[max_acc].front();
+        dstrm_ << "* max_acc: " << max_acc << std::endl;
+        return Bad;
     }
 
-    void do_actions(const Turn_info& turn_info)
+    void do_actions()
     {
-        Direction move_dir = move_direction(turn_info);
-        ostrm_ << move_action(move_dir) << " TORPEDO" << std::endl;
+        Direction move_dir = move_direction();
+        dstrm_ << "* move_dir: " << dir_to_string(move_dir) << std::endl;
+        if (dir_is_valid(move_dir))
+            ostrm_ << move_action(move_dir) << " TORPEDO" << std::endl;
+        else
+        {
+            ostrm_ << "SURFACE TORPEDO" << std::endl;
+            map_.clear_visit(avatar_.id);
+        }
     }
 
     // actions formatting:
@@ -377,7 +445,7 @@ public:
         Turn_info turn_info;
         istrm_ >> turn_info;
         update_data(turn_info);
-        do_actions(turn_info);
+        do_actions();
     }
 
     // MISC
