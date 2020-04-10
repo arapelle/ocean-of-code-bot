@@ -4,6 +4,8 @@
 
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <string_view>
 #include <vector>
 #include <deque>
 #include <algorithm>
@@ -35,6 +37,20 @@ enum Direction : char
 std::size_t number_of_directions() { return 4; }
 
 bool dir_is_valid(Direction dir) { return unsigned(dir) < number_of_directions(); }
+
+Direction char_to_dir(char ch)
+{
+    switch (ch)
+    {
+    case 'N': return North;
+    case 'E': return East;
+    case 'S': return South;
+    case 'W': return West;
+    default: std::cerr << "ERR: Bad char dir" << std::endl;
+        ;
+    }
+    return Bad;
+}
 
 std::string dir_to_string(Direction dir)
 {
@@ -180,16 +196,12 @@ public:
         const Square& square = get(pos);
         if (square.is_ocean() && !square.is_visited(actor_id))
         {
-            std::cerr << "** acc.pos: " << pos << std::endl;
             for (unsigned dir = 0; dir < number_of_directions(); ++dir)
             {
                 Position npos = pos.neighbour(Direction(dir));
                 if (contains(npos))
                 {
-                    std::cerr << "** acc.npos: " << npos << std::endl;
                     const Square& nsquare = get(npos);
-                    std::cerr << "** acc.npos.is_visited: " << nsquare.is_visited(actor_id) << std::endl;
-                    std::cerr << "** acc.npos.is_ocean: " << nsquare.is_ocean() << std::endl;
                     if (!nsquare.is_visited(actor_id) && nsquare.is_ocean())
                         ++res;
                 }
@@ -233,6 +245,7 @@ struct Turn_info
 
     friend std::ostream& operator<<(std::ostream& stream, const Turn_info& info)
     {
+        stream << "TURN INFO:[[" << std::endl;
         stream << "pos: (" << info.x << " " << info.y << "), " << "HP: " << info.myLife << ",\n";
         if (info.torpedoCooldown >= 0)
             stream << "torpedo_cooldown: " << info.torpedoCooldown << "\n";
@@ -246,7 +259,7 @@ struct Turn_info
         if (info.mineCooldown >= 0)
             stream << "mine_cooldown: " << info.mineCooldown << "\n";
         stream << "Opponent's HP: " << info.oppLife << "\n"
-               << "Opponent's Orders: " << info.opponentOrders << "\n";
+               << "Opponent's Orders: " << info.opponentOrders << "\n]]";
         return stream;
     }
 
@@ -257,7 +270,7 @@ struct Turn_info
         stream.ignore();
         stream >> info.sonarResult;
         stream.ignore();
-        std::getline(std::cin, info.opponentOrders);
+        std::getline(stream, info.opponentOrders);
         return stream;
     }
 };
@@ -277,7 +290,7 @@ public:
 
     struct Status
     {
-        Position position;
+        Position position = Position(-1, -1);
         int hp = -1;
     };
 
@@ -287,6 +300,7 @@ public:
 
     const Position& position() const { return status.position; }
     Position& position() { return status.position; }
+    bool position_is_known() const { return position().x >= 0 && position().y >= 0; }
     const int& hp() const { return status.hp; }
     int& hp() { return status.hp; }
 
@@ -307,6 +321,43 @@ public:
 class Opponent : public Player_info
 {
 public:
+    int sector = -1;
+    std::vector<Direction> relative_path;
+
+    inline bool sector_is_known() const { return sector >= 0; }
+    void reset_sector() { sector = -1; }
+
+    void treat_order(const std::string_view& order)
+    {
+        std::istringstream iss(std::string(order.begin(), order.end()));
+        std::string command;
+        iss >> command;
+        if (command == "SURFACE")
+        {
+            iss >> sector;
+            relative_path.clear();
+        }
+        else if (command == "MOVE")
+        {
+            char dir_ch;
+            iss >> dir_ch;
+            relative_path.push_back(char_to_dir(dir_ch));
+        }
+    }
+
+    void update_data(const std::string& orders)
+    {
+        std::size_t index = 0;
+        std::size_t end_index = 0;
+        for (; index < orders.length(); index = end_index + 1)
+        {
+            end_index = orders.find('|', index);
+            end_index = std::min(end_index, orders.length());
+            std::string_view order(&orders[index], end_index);
+            if (!order.empty())
+                treat_order(order);
+        }
+    }
 
 private:
 };
@@ -391,6 +442,10 @@ public:
         avatar_.mine().cooldown = turn_info.mineCooldown;
         opponent_.save_status();
         opponent_.status.hp = turn_info.oppLife;
+        opponent_.update_data(turn_info.opponentOrders);
+        if (opponent_.sector_is_known())
+            dstrm_ << "Opponent's sector: " << opponent_.sector << std::endl;
+        dstrm_ << "Opponent's path: " << opponent_.relative_path.size() << std::endl;
     }
 
     // ia:
@@ -402,11 +457,9 @@ public:
         {
             Direction dir = Direction(i);
             Position npos = pos.neighbour(dir);
-            dstrm_ << "** npos: " << npos << std::endl;
             if (map_.contains(npos))
             {
                 std::size_t acc = map_.accessibility(npos, avatar_.id);
-                dstrm_ << "** acc: " << acc << std::endl;
                 tdirs[acc].push_back(dir);
             }
         }
@@ -416,18 +469,20 @@ public:
                 break;
         if (max_acc > 0)
             return tdirs[max_acc].front();
-        dstrm_ << "* max_acc: " << max_acc << std::endl;
         return Bad;
     }
 
     void do_actions()
     {
         Direction move_dir = move_direction();
-        dstrm_ << "* move_dir: " << dir_to_string(move_dir) << std::endl;
         if (dir_is_valid(move_dir))
+        {
+            dstrm_ << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
             ostrm_ << move_action(move_dir) << " TORPEDO" << std::endl;
+        }
         else
         {
+            dstrm_ << "ACTION: SURFACE" << std::endl;
             ostrm_ << "SURFACE TORPEDO" << std::endl;
             map_.clear_visit(avatar_.id);
         }
