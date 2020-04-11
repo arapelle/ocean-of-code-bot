@@ -618,7 +618,7 @@ public:
 
     Position choose_start_position()
     {
-        std::map<std::size_t, std::vector<Position>> mpos;
+        std::map<std::size_t, std::vector<Position>, std::greater<std::size_t>> mpos;
         for (int j = 0; j < map_.height(); ++j)
             for (int i = 0; i < map_.width(); ++i)
             {
