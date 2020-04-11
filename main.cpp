@@ -3,6 +3,7 @@
 #endif
 
 #include <iostream>
+#include <random>
 #include <string>
 #include <sstream>
 #include <string_view>
@@ -11,6 +12,23 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cassert>
+
+namespace priv
+{
+std::mt19937_64& rand_int_engine()
+{
+    static std::mt19937_64 rnd_engine(std::random_device{}());
+    return rnd_engine;
+}
+}
+
+template <class NT>
+NT randint (NT a, NT b)
+{
+    using Dist = std::uniform_int_distribution<NT>;
+    static thread_local Dist dist;
+    return dist(priv::rand_int_engine(), typename Dist::param_type{a, b});
+}
 
 std::ostream& info() { return std::cerr; }
 std::ostream& error() { return std::cerr << "ERROR: "; }
@@ -598,20 +616,35 @@ public:
     void do_actions()
     {
         Direction move_dir = move_direction();
-        if (dir_is_valid(move_dir))
+        if (avatar_.silence().is_ready())
+        {
+            unsigned distance = randint<unsigned>(0, 1);
+            if (!dir_is_valid(move_dir))
+            {
+                move_dir = North;
+                distance = 0;
+            }
+            ostrm_ << silence_action(move_dir, distance) << std::endl;
+        }
+        else if (dir_is_valid(move_dir))
         {
             info() << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
-            ostrm_ << move_action(move_dir) << " TORPEDO" << std::endl;
+            ostrm_ << move_action(move_dir) << " SILENCE" << std::endl;
         }
         else
         {
             info() << "ACTION: SURFACE" << std::endl;
-            ostrm_ << "SURFACE TORPEDO" << std::endl;
+            ostrm_ << "SURFACE SILENCE" << std::endl;
             map_.clear_visit(avatar_.id);
         }
     }
 
     // actions formatting:
+    std::string silence_action(Direction dir, unsigned distance)
+    {
+        return std::string("SILENCE ") + dir_to_string(dir) + " " + std::to_string(distance);
+    }
+
     std::string move_action(Direction dir)
     {
         return std::string("MOVE ") + dir_to_string(dir);
