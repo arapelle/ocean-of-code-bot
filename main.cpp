@@ -7,8 +7,10 @@
 #include <string>
 #include <sstream>
 #include <string_view>
+#include <map>
 #include <vector>
 #include <deque>
+#include <queue>
 #include <algorithm>
 #include <cstdlib>
 #include <cassert>
@@ -33,6 +35,31 @@ NT randint (NT a, NT b)
 std::ostream& info() { return std::cerr; }
 std::ostream& error() { return std::cerr << "ERROR: "; }
 std::ostream& debug() { return std::cerr << "DEBUG: "; }
+
+struct Function_trace
+{
+    Function_trace(const char* file, int line, const char* func)
+        : file(file), line(line), func(func)
+    {
+        debug() << file << ":" << line << " " << func << std::endl;
+    }
+
+    ~Function_trace()
+    {
+        debug() << "/" << file << ":" << line << " " << func << std::endl;
+    }
+
+    const char* file;
+    int line;
+    const char* func;
+};
+
+#define TRACE 1
+#ifdef TRACE
+#define trace() Function_trace ftrace__(__FILE__, __LINE__, __PRETTY_FUNCTION__)
+#else
+#define trace do {} while(false)
+#endif
 
 struct Game_info
 {
@@ -170,15 +197,18 @@ private:
 template <class Type>
 class Grid
 {
+    using Ref = typename std::vector<Type>::reference;
+    using Const_ref = typename std::vector<Type>::const_reference;
+
 public:
-    explicit Grid(int width = 0, int height = 0) { resize(width, height); }
+    explicit Grid(int width = 0, int height = 0, const Type& value = Type()) { resize(width, height, value); }
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }
-    inline const Type& get(int x, int y) const { return data_.at(y).at(x); }
-    inline Type& get(int x, int y) { return data_.at(y).at(x); }
-    inline const Type& get(const Position& pos) const { return get(pos.x, pos.y); }
-    inline Type& get(const Position& pos) { return get(pos.x, pos.y); }
+    inline Const_ref get(int x, int y) const { return data_.at(y).at(x); }
+    inline Ref get(int x, int y) { return data_.at(y).at(x); }
+    inline Const_ref get(const Position& pos) const { return get(pos.x, pos.y); }
+    inline Ref get(const Position& pos) { return get(pos.x, pos.y); }
 
     void clear() { width_ = 0; height_ = 0; data_.clear(); }
 
@@ -241,7 +271,7 @@ public:
         {
             int sx = pos.x / sector_width();
             int sy = pos.y / sector_height();
-            return sy * sector_height() + sx + 1;
+            return sy * number_of_sectors_on_y() + sx + 1;
         }
         error() << "invalid position: " << pos << std::endl;
         return -1;
@@ -255,8 +285,8 @@ public:
             return Sector_position(-1,-1);
         }
         --sector;
-        int y = sector / width();
-        int x = sector % width();
+        int y = sector / number_of_sectors_on_x();
+        int x = sector % number_of_sectors_on_x();
         return Sector_position(x,y);
     }
 
@@ -307,6 +337,43 @@ public:
             }
         }
         return res;
+    }
+
+    std::size_t number_of_reachable_squares(const Position& pos, int actor_id)
+    {
+        std::size_t count = 0;
+
+        Grid<uint8_t> visited(width(), height(), 0);
+        std::queue<Position> posq;
+        auto is_reachable = [&](const Position& sqpos)
+        {
+            const Square& square = get(sqpos);
+            return square.is_ocean() && !square.is_visited(actor_id);
+        };
+        auto visit = [&](const Position& sqpos)
+        {
+            visited.get(sqpos) = 1;
+            posq.push(sqpos);
+            ++count;
+        };
+
+        if (is_reachable(pos))
+            visit(pos);
+
+        while (!posq.empty())
+        {
+            Position cpos = posq.front();
+            posq.pop();
+            for (unsigned i = 0; i < number_of_directions(); ++i)
+            {
+                Direction dir = Direction(i);
+                Position npos = cpos.neighbour(dir);
+                if (contains(npos) && is_reachable(npos) && !visited.get(npos))
+                    visit(npos);
+            }
+        }
+
+        return count;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, const Map& map)
@@ -551,11 +618,25 @@ public:
 
     Position choose_start_position()
     {
+        std::map<std::size_t, std::vector<Position>> mpos;
         for (int j = 0; j < map_.height(); ++j)
-            for (int i = map_.width()-1; i > 0; --i)
-                if (map_.get(i,j).is_ocean())
-                    return Position(i,j);
-        return Position(7,7);
+            for (int i = 0; i < map_.width(); ++i)
+            {
+                Position pos(i,j);
+                if (map_.get(pos).is_ocean())
+                {
+                    std::size_t zone_size = map_.number_of_reachable_squares(pos, avatar_.id);
+                    mpos[zone_size].push_back(pos);
+                }
+            }
+        auto& vpos = mpos.begin()->second;
+        std::shuffle(vpos.begin(), vpos.end(), priv::rand_int_engine());
+        auto iter = std::min_element(vpos.begin(), vpos.end(),
+                                     [&](const Position& lhs, const Position& rhs)
+        {
+                return map_.accessibility(lhs, avatar_.id) < map_.accessibility(rhs, avatar_.id);
+        });
+        return *iter;
     }
 
     void play_start_actions()
@@ -570,6 +651,7 @@ public:
     // update:
     void update_data(const Turn_info& turn_info)
     {
+        trace();
         info() << turn_info << std::endl;
         avatar_.save_status();
         avatar_.position() = Position(turn_info.x, turn_info.y);
@@ -593,28 +675,36 @@ public:
     Direction move_direction()
     {
         Position pos = avatar_.position();
-        std::vector<std::vector<Direction>> tdirs(number_of_directions() + 1);
+        std::map<unsigned, std::vector<Direction>, std::greater<unsigned>> mdirs;
         for (unsigned i = 0; i < number_of_directions(); ++i)
         {
             Direction dir = Direction(i);
             Position npos = pos.neighbour(dir);
             if (map_.contains(npos))
             {
-                std::size_t acc = map_.accessibility(npos, avatar_.id);
-                tdirs[acc].push_back(dir);
+                unsigned zone_size = map_.number_of_reachable_squares(npos, avatar_.id);
+                if (zone_size > 0)
+                    mdirs[zone_size].push_back(dir);
             }
         }
-        unsigned max_acc = number_of_directions();
-        for (; max_acc > 0; --max_acc)
-            if (!tdirs[max_acc].empty())
-                break;
-        if (max_acc > 0)
-            return tdirs[max_acc].front();
+        if (mdirs.size() > 0)
+        {
+            const auto& dirs = mdirs.begin()->second;
+//            return dirs.front();
+            auto iter = std::min_element(dirs.begin(), dirs.end(),
+                             [&](Direction ldir, Direction rdir)
+                             {
+                                 return map_.accessibility(pos.neighbour(ldir), avatar_.id)
+                                         < map_.accessibility(pos.neighbour(rdir), avatar_.id);
+                             });
+            return *iter;
+        }
         return Bad;
     }
 
     void do_actions()
     {
+        trace();
         Direction move_dir = move_direction();
         if (avatar_.silence().is_ready())
         {
@@ -700,13 +790,14 @@ void Opponent::init()
 
 void Opponent::update_pos_info_with_sector_()
 {
+    trace();
     const Map& map = game->map();
     int previous_turn_number = game->turn_number() - 1;
 
     Position origin = map.sector_origin(sector);
     unsigned mark_count = 0;
     Position last_pos;
-    for (int j = 0; j < map.sector_width(); ++j)
+    for (int j = 0; j < map.sector_height(); ++j)
     {
         for (int i = 0; i < map.sector_width(); ++i)
         {
