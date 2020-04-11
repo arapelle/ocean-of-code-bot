@@ -12,6 +12,10 @@
 #include <cstdlib>
 #include <cassert>
 
+std::ostream& info() { return std::cerr; }
+std::ostream& error() { return std::cerr << "ERROR: "; }
+std::ostream& debug() { return std::cerr << "DEBUG: "; }
+
 struct Game_info
 {
     int map_width = -1;
@@ -46,7 +50,7 @@ Direction char_to_dir(char ch)
     case 'E': return East;
     case 'S': return South;
     case 'W': return West;
-    default: std::cerr << "ERR: Bad char dir" << std::endl;
+    default: error() << "Bad char dir" << std::endl;
         ;
     }
     return Bad;
@@ -113,7 +117,7 @@ public:
         case East: ++x; break;
         case South: ++y; break;
         case West: --x; break;
-        default: std::cerr << "ERR: Bad Move" << std::endl;
+        default: error() << "Bad Move" << std::endl;
         }
         return *this;
     }
@@ -127,6 +131,7 @@ public:
 };
 
 using Position = Vec2;
+using Sector_position = Vec2;
 
 struct Square
 {
@@ -144,15 +149,114 @@ private:
     uint64_t visited_mask_ = 0;
 };
 
-class Map
+template <class Type>
+class Grid
 {
 public:
-    Map(int width = 0, int height = 0) { resize(width, height); }
+    explicit Grid(int width = 0, int height = 0) { resize(width, height); }
+
+    inline int width() const { return width_; }
+    inline int height() const { return height_; }
+    inline const Type& get(int x, int y) const { return data_.at(y).at(x); }
+    inline Type& get(int x, int y) { return data_.at(y).at(x); }
+    inline const Type& get(const Position& pos) const { return get(pos.x, pos.y); }
+    inline Type& get(const Position& pos) { return get(pos.x, pos.y); }
+
+    void clear() { width_ = 0; height_ = 0; data_.clear(); }
+
+    void resize(int width, int height, const Type& value = Type())
+    {
+        width_ = width;
+        height_ = height;
+        data_.resize(height_);
+        for (auto& row : data_)
+            row.resize(width_, value);
+    }
+
+    bool contains(const Position& pos) const
+    {
+        return pos.x >= 0 && pos.x < width_ && pos.y >= 0 && pos.y < height_;
+    }
+
+    friend std::ostream& operator<<(std::ostream& stream, const Grid<Type>& grid)
+    {
+        stream << "[GRID:" << grid.width() << " x " << grid.height() << "\n";
+        for (const auto& row : grid.data_)
+        {
+            for (const auto& element : row)
+                stream << element << " ";
+            stream << std::endl;
+        }
+        stream << "]";
+        return stream;
+    }
+
+protected:
+    int width_ = -1;
+    int height_ = -1;
+    std::vector<std::vector<Type>> data_;
+};
+
+class Map : public Grid<Square>
+{
+public:
+    Map(int width = 0, int height = 0)
+        : Grid<Square>(width, height)
+    {}
+
+    inline int sector_width() const { return sector_width_; }
+    inline int sector_height() const { return sector_height_; }
+
+    void set_sector_size(int s_width, int s_height)
+    {
+        sector_width_ = s_width;
+        sector_height_ = s_height;
+    }
+
+    int number_of_sectors_on_x() const { return width() / sector_width_; }
+    int number_of_sectors_on_y() const { return height() / sector_height_; }
+    int number_of_sectors() const { return number_of_sectors_on_x() * number_of_sectors_on_y(); }
+
+    int position_to_sector_index(const Position& pos) const
+    {
+        if (contains(pos))
+        {
+            int sx = pos.x / sector_width();
+            int sy = pos.y / sector_height();
+            return sy * sector_height() + sx + 1;
+        }
+        error() << "invalid position: " << pos << std::endl;
+        return -1;
+    }
+
+    Sector_position sector_index_to_sector_position(int sector) const
+    {
+        if (sector < 1 || sector > number_of_sectors())
+        {
+            error() << "invalid sector: " << sector << std::endl;
+            return Sector_position(-1,-1);
+        }
+        --sector;
+        int y = sector / width();
+        int x = sector % width();
+        return Sector_position(x,y);
+    }
+
+    Position sector_origin(int sector) const
+    {
+        if (sector < 1 || sector > number_of_sectors())
+        {
+            error() << "invlaid sector: " << sector << std::endl;
+            return Position(-1,-1);
+        }
+        Sector_position spos = sector_index_to_sector_position(sector);
+        return Position(spos.x * sector_width_, spos.y * sector_height_);
+    }
 
     void fill_from_stream(std::istream& stream)
     {
         std::string line;
-        for (auto& row : grid_)
+        for (auto& row : data_)
         {
             std::getline(stream, line);
             for (int i = 0; i < width_; ++i)
@@ -160,34 +264,11 @@ public:
         }
     }
 
-    inline int width() const { return width_; }
-    inline int height() const { return height_; }
-    inline const Square& get(int x, int y) const { return grid_.at(y).at(x); }
-    inline Square& get(int x, int y) { return grid_.at(y).at(x); }
-    inline const Square& get(const Position& pos) const { return get(pos.x, pos.y); }
-    inline Square& get(const Position& pos) { return get(pos.x, pos.y); }
-
-    void clear() { width_ = 0; height_ = 0; grid_.clear(); }
-
     void clear_visit(int actor_id)
     {
-        for (auto& row : grid_)
+        for (auto& row : data_)
             for (auto& square : row)
                 square.unset_visited(actor_id);
-    }
-
-    void resize(int width, int height)
-    {
-        width_ = width;
-        height_ = height;
-        grid_.resize(height_);
-        for (auto& row : grid_)
-            row.resize(width_);
-    }
-
-    bool contains(const Position& pos) const
-    {
-        return pos.x >= 0 && pos.x < width_ && pos.y >= 0 && pos.y < height_;
     }
 
     std::size_t accessibility(const Position& pos, int actor_id) const
@@ -212,7 +293,7 @@ public:
 
     friend std::ostream& operator<<(std::ostream& stream, const Map& map)
     {
-        for (const auto& row : map.grid_)
+        for (const auto& row : map.data_)
         {
             for (const auto& square : row)
                 stream << square.type();
@@ -221,10 +302,9 @@ public:
         return stream;
     }
 
-private:
-    int width_;
-    int height_;
-    std::vector<std::vector<Square>> grid_;
+protected:
+    int sector_width_ = -1;
+    int sector_height_ = -1;
 };
 
 struct Turn_info
@@ -245,7 +325,7 @@ struct Turn_info
 
     friend std::ostream& operator<<(std::ostream& stream, const Turn_info& info)
     {
-        stream << "TURN INFO:[[" << std::endl;
+        stream << "TURN INFO:\n{" << std::endl;
         stream << "pos: (" << info.x << " " << info.y << "), " << "HP: " << info.myLife << ",\n";
         if (info.torpedoCooldown >= 0)
             stream << "torpedo_cooldown: " << info.torpedoCooldown << "\n";
@@ -259,7 +339,7 @@ struct Turn_info
         if (info.mineCooldown >= 0)
             stream << "mine_cooldown: " << info.mineCooldown << "\n";
         stream << "Opponent's HP: " << info.oppLife << "\n"
-               << "Opponent's Orders: " << info.opponentOrders << "\n]]";
+               << "Opponent's Orders: " << info.opponentOrders << "\n}";
         return stream;
     }
 
@@ -283,6 +363,8 @@ struct Tool
     bool is_ready() const { return cooldown == 0; }
 };
 
+class Game;
+
 class Player_info
 {
 public:
@@ -294,9 +376,12 @@ public:
         int hp = -1;
     };
 
-    int id = -1;
-    Status status;
-    std::deque<Status> history_status;
+    Player_info()
+    {}
+
+    explicit Player_info(Game& game)
+        : game(&game)
+    {}
 
     const Position& position() const { return status.position; }
     Position& position() { return status.position; }
@@ -316,13 +401,24 @@ public:
     {
         return stream >> info.id;
     }
+
+public:
+    Game* game = nullptr;
+    int id = -1;
+    Status status;
+    std::deque<Status> history_status;
 };
 
 class Opponent : public Player_info
 {
 public:
-    int sector = -1;
-    std::vector<Direction> relative_path;
+    using Mark_map = Grid<int16_t>;
+
+    explicit Opponent(Game& game)
+        : Player_info(game)
+    {}
+
+    void init();
 
     inline bool sector_is_known() const { return sector >= 0; }
     void reset_sector() { sector = -1; }
@@ -336,12 +432,19 @@ public:
         {
             iss >> sector;
             relative_path.clear();
+            update_pos_info_with_sector_();
         }
         else if (command == "MOVE")
         {
             char dir_ch;
             iss >> dir_ch;
-            relative_path.push_back(char_to_dir(dir_ch));
+            Direction dir = char_to_dir(dir_ch);
+            relative_path.push_back(dir);
+            update_pos_info_with_move_dir_(dir);
+        }
+        else if (command == "SILENCE")
+        {
+            //TODO
         }
     }
 
@@ -359,7 +462,16 @@ public:
         }
     }
 
+    const Mark_map& mark_map() const { return mark_map_; }
+
 private:
+    void update_pos_info_with_sector_();
+    void update_pos_info_with_move_dir_(Direction dir);
+
+public:
+    int sector = -1;
+    std::vector<Direction> relative_path;
+    Mark_map mark_map_;
 };
 
 class Avatar : public Player_info
@@ -373,6 +485,11 @@ public:
         Tool mine;
     };
 
+public:
+    explicit Avatar(Game& game)
+        : Player_info(game)
+    {}
+
     Toolkit toolkit;
     const Tool& torpedo() const { return toolkit.torpedo; }
     Tool& torpedo() { return toolkit.torpedo; }
@@ -382,15 +499,17 @@ public:
     Tool& silence() { return toolkit.silence; }
     const Tool& mine() const { return toolkit.mine; }
     Tool& mine() { return toolkit.mine; }
-
-private:
 };
 
 class Game
 {
 public:
-    Game(std::istream& istream, std::ostream& ostream, std::ostream& dstream)
-         : istrm_(istream), ostrm_(ostream), dstrm_(dstream)
+    static int default_sector_width() { return 5; }
+    static int default_sector_height() { return 5; }
+
+    Game(std::istream& istream, std::ostream& ostream)
+         : avatar_(*this), opponent_(*this),
+           istrm_(istream), ostrm_(ostream)
     {}
 
     // START
@@ -400,20 +519,22 @@ public:
         istrm_.ignore();
         map_.resize(game_info_.map_width, game_info_.map_height);
         map_.fill_from_stream(istrm_);
+        map_.set_sector_size(default_sector_width(), default_sector_height());
 
         opponent_.id = avatar_.id == 0 ? 1 : 0;
+        opponent_.init();
     }
 
     void print_start_info() const
     {
-        dstrm_ << game_info_.map_width << " " << game_info_.map_height << "  " << avatar_.id << std::endl;
-        dstrm_ << map_ << std::endl;
+        info() << game_info_.map_width << " " << game_info_.map_height << "  " << avatar_.id << std::endl;
+        info() << map_ << std::endl;
     }
 
     Position choose_start_position()
     {
         for (int j = 0; j < map_.height(); ++j)
-            for (int i = map_.width()-1; i > 0; ++i)
+            for (int i = map_.width()-1; i > 0; --i)
                 if (map_.get(i,j).is_ocean())
                     return Position(i,j);
         return Position(7,7);
@@ -431,7 +552,7 @@ public:
     // update:
     void update_data(const Turn_info& turn_info)
     {
-        dstrm_ << turn_info << std::endl;
+        info() << turn_info << std::endl;
         avatar_.save_status();
         avatar_.position() = Position(turn_info.x, turn_info.y);
         map_.get(avatar_.position()).set_visited(avatar_.id);
@@ -444,8 +565,10 @@ public:
         opponent_.status.hp = turn_info.oppLife;
         opponent_.update_data(turn_info.opponentOrders);
         if (opponent_.sector_is_known())
-            dstrm_ << "Opponent's sector: " << opponent_.sector << std::endl;
-        dstrm_ << "Opponent's path: " << opponent_.relative_path.size() << std::endl;
+            info() << "Opponent's sector: " << opponent_.sector << std::endl;
+        if (opponent_.position_is_known())
+            info() << "Opponent's pos: " << opponent_.position() << std::endl;
+        info() << "Opponent's path: " << opponent_.relative_path.size() << std::endl;
     }
 
     // ia:
@@ -477,12 +600,12 @@ public:
         Direction move_dir = move_direction();
         if (dir_is_valid(move_dir))
         {
-            dstrm_ << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
+            info() << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
             ostrm_ << move_action(move_dir) << " TORPEDO" << std::endl;
         }
         else
         {
-            dstrm_ << "ACTION: SURFACE" << std::endl;
+            info() << "ACTION: SURFACE" << std::endl;
             ostrm_ << "SURFACE TORPEDO" << std::endl;
             map_.clear_visit(avatar_.id);
         }
@@ -499,8 +622,14 @@ public:
     {
         Turn_info turn_info;
         istrm_ >> turn_info;
+
+        info() << "---------------------------------------------" << std::endl;
+        info() << "TURN NUMBER: " << turn_number_ << std::endl << std::flush;
+
         update_data(turn_info);
         do_actions();
+
+        ++turn_number_;
     }
 
     // MISC
@@ -508,8 +637,10 @@ public:
     const Map& map() const { return map_; }
     const Player_info& avatar() const { return avatar_; }
     const Player_info& opponent() const { return opponent_; }
+    int turn_number() const { return turn_number_; }
 
 private:
+    int turn_number_ = 0;
     Game_info game_info_;
     Map map_;
     Avatar avatar_;
@@ -517,12 +648,84 @@ private:
 
     std::istream& istrm_;
     std::ostream& ostrm_;
-    std::ostream& dstrm_;
 };
+
+void Opponent::init()
+{
+    const Map& map = game->map();
+
+    mark_map_.resize(map.width(), map.height(), 0);
+    for (int j = 0; j < mark_map_.height(); ++j)
+    {
+        for (int i = 0; i < mark_map_.width(); ++i)
+        {
+            if (!map.get(i,j).is_ocean())
+                mark_map_.get(i,j) = -2;
+        }
+    }
+}
+
+void Opponent::update_pos_info_with_sector_()
+{
+    const Map& map = game->map();
+    int previous_turn_number = game->turn_number() - 1;
+
+    Position origin = map.sector_origin(sector);
+    unsigned mark_count = 0;
+    Position last_pos;
+    for (int j = 0; j < map.sector_width(); ++j)
+    {
+        for (int i = 0; i < map.sector_width(); ++i)
+        {
+            Position pos = Position(i,j) + origin;
+            if (mark_map_.get(pos) == previous_turn_number)
+            {
+                mark_map_.get(pos) = game->turn_number();
+                ++mark_count;
+                last_pos = pos;
+            }
+        }
+    }
+    if (mark_count == 1)
+        position() = last_pos;
+}
+
+void Opponent::update_pos_info_with_move_dir_(Direction dir)
+{
+    const Map& map = game->map();
+    int previous_turn_number = game->turn_number() - 1;
+
+    unsigned mark_count = 0;
+    Position last_pos;
+    Mark_map next_mark_map(mark_map_);
+    for (int j = 0; j < mark_map_.height(); ++j)
+    {
+        for (int i = 0; i < mark_map_.width(); ++i)
+        {
+            Position pos(i,j);
+            Position npos = pos.neighbour(dir);
+            if (mark_map_.get(pos) == previous_turn_number && map.contains(npos) && map.get(npos).is_ocean())
+            {
+                next_mark_map.get(npos) = game->turn_number();
+                ++mark_count;
+                last_pos = npos;
+            }
+        }
+    }
+    mark_map_ = next_mark_map;
+    //TODO if mark_count > 1 && all marked squares are in the same sector:
+    //         sector = visited_sector;
+
+    if (mark_count == 1)
+    {
+        position() = last_pos;
+        sector = map.position_to_sector_index(last_pos);
+    }
+}
 
 int main()
 {
-    Game game(std::cin, std::cout, std::cerr);
+    Game game(std::cin, std::cout);
     game.init();
 
     game.play_start_actions();
