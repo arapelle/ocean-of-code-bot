@@ -308,7 +308,7 @@ public:
     {
         if (sector < 1 || sector > number_of_sectors())
         {
-            error() << "invlaid sector: " << sector << std::endl;
+            error() << "invalid sector: " << sector << std::endl;
             return Position(-1,-1);
         }
         Sector_position spos = sector_index_to_sector_position(sector);
@@ -765,8 +765,6 @@ public:
 
         info() << "---------------------------------------------" << std::endl;
         info() << "TURN NUMBER: " << turn_number_ << std::endl << std::flush;
-        if (turn_number_ >= 10)
-            exit(0);
 
         update_data(turn_info);
         do_actions();
