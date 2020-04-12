@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <random>
+#include <iomanip>
 #include <string>
 #include <sstream>
 #include <string_view>
@@ -41,12 +42,12 @@ struct Function_trace
     Function_trace(const char* file, int line, const char* func)
         : file(file), line(line), func(func)
     {
-        debug() << file << ":" << line << " " << func << std::endl;
+        debug() << "TRACE: " << file << ":" << line << " " << func << std::endl;
     }
 
     ~Function_trace()
     {
-        debug() << "/" << file << ":" << line << " " << func << std::endl;
+        debug() << "/TRACE: " << file << ":" << line << " " << func << std::endl;
     }
 
     const char* file;
@@ -86,6 +87,8 @@ enum Direction : char
 std::size_t number_of_directions() { return 4; }
 
 bool dir_is_valid(Direction dir) { return unsigned(dir) < number_of_directions(); }
+
+Direction opposed_direction(Direction dir) { return dir_is_valid(dir) ? Direction((unsigned(dir) + 2) % 4) : dir; }
 
 Direction char_to_dir(char ch)
 {
@@ -154,6 +157,16 @@ public:
         return res;
     }
 
+    bool operator==(const Vec2& rfs) const
+    {
+        return x == rfs.x && y == rfs.y;
+    }
+
+    bool operator!=(const Vec2& rfs) const
+    {
+        return x != rfs.x && y != rfs.y;
+    }
+
     Vec2& move(Direction dir)
     {
         switch (dir)
@@ -176,6 +189,7 @@ public:
 };
 
 using Position = Vec2;
+using Offset = Vec2;
 using Sector_position = Vec2;
 
 struct Square
@@ -232,7 +246,7 @@ public:
         for (const auto& row : grid.data_)
         {
             for (const auto& element : row)
-                stream << element << " ";
+                stream << std::setw(2) << element << " ";
             stream << std::endl;
         }
         stream << "]";
@@ -529,7 +543,8 @@ public:
         }
         else if (command == "SILENCE")
         {
-            //TODO
+            update_pos_info_with_last_orientation_();
+            relative_path.push_back(Undefined);
         }
     }
 
@@ -550,6 +565,8 @@ public:
     const Mark_map& mark_map() const { return mark_map_; }
 
 private:
+    std::vector<Position> silence_destinations_(Position origin, Direction dir);
+    void update_pos_info_with_last_orientation_();
     void update_pos_info_with_sector_();
     void update_pos_info_with_move_dir_(Direction dir);
 
@@ -748,6 +765,8 @@ public:
 
         info() << "---------------------------------------------" << std::endl;
         info() << "TURN NUMBER: " << turn_number_ << std::endl << std::flush;
+        if (turn_number_ >= 10)
+            exit(0);
 
         update_data(turn_info);
         do_actions();
@@ -785,6 +804,75 @@ void Opponent::init()
             if (!map.get(i,j).is_ocean())
                 mark_map_.get(i,j) = -2;
         }
+    }
+}
+
+std::vector<Position> Opponent::silence_destinations_(Position origin, Direction orientation)
+{
+    const Map& map = game->map();
+
+    Direction opposed_dir = opposed_direction(orientation);
+    std::vector<Position> sdests;
+    sdests.push_back(origin);
+    for (unsigned i = 0; i < number_of_directions(); ++i)
+    {
+        Direction dir = Direction(i);
+        if (dir != opposed_dir)
+        {
+            Position npos = origin;
+            for (unsigned j = 1; j <= 4; ++j)
+            {
+                npos.move(dir);
+                if (!map.contains(npos))
+                    break;
+                const Square& square = map.get(npos);
+                if (square.is_ocean() && !square.is_visited(id))
+                    sdests.push_back(npos);
+                else
+                    break;
+            }
+        }
+    }
+    return sdests;
+}
+
+void Opponent::update_pos_info_with_last_orientation_()
+{
+    trace();
+    const Map& map = game->map();
+    int previous_turn_number = game->turn_number() - 1;
+    Direction last_dir = relative_path.back();
+
+    unsigned mark_count = 0;
+    Position last_pos;
+    Mark_map next_mark_map(mark_map_);
+    for (int j = 0; j < mark_map_.height(); ++j)
+    {
+        for (int i = 0; i < mark_map_.width(); ++i)
+        {
+            Position pos(i,j);
+            if (mark_map_.get(pos) == previous_turn_number)
+            {
+                std::vector<Position> sdests = silence_destinations_(pos, last_dir);
+                for (const Position& npos : sdests)
+                {
+                    next_mark_map.get(npos) = game->turn_number();
+                    ++mark_count;
+                    last_pos = npos;
+                }
+            }
+        }
+    }
+//    debug() << mark_map_ << std::endl;
+//    debug() << next_mark_map << std::endl;
+    mark_map_ = next_mark_map;
+    //TODO if mark_count > 1 && all marked squares are in the same sector:
+    //         sector = visited_sector;
+
+    if (mark_count == 1)
+    {
+        position() = last_pos;
+        sector = map.position_to_sector_index(last_pos);
     }
 }
 
