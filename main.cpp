@@ -1,5 +1,5 @@
 #ifdef NDEBUG
-#undef NDEBUG
+//#undef NDEBUG
 #endif
 
 #include <iostream>
@@ -259,11 +259,12 @@ protected:
     std::vector<std::vector<Type>> data_;
 };
 
-class Map : public Grid<Square>
+template <class Type>
+class Grid_with_sectors : public Grid<Type>
 {
 public:
-    Map(int width = 0, int height = 0)
-        : Grid<Square>(width, height)
+    Grid_with_sectors(int width = 0, int height = 0)
+        : Grid<Type>(width, height)
     {}
 
     inline int sector_width() const { return sector_width_; }
@@ -275,13 +276,13 @@ public:
         sector_height_ = s_height;
     }
 
-    int number_of_sectors_on_x() const { return width() / sector_width_; }
-    int number_of_sectors_on_y() const { return height() / sector_height_; }
+    int number_of_sectors_on_x() const { return this->width() / sector_width_; }
+    int number_of_sectors_on_y() const { return this->height() / sector_height_; }
     int number_of_sectors() const { return number_of_sectors_on_x() * number_of_sectors_on_y(); }
 
     int position_to_sector_index(const Position& pos) const
     {
-        if (contains(pos))
+        if (this->contains(pos))
         {
             int sx = pos.x / sector_width();
             int sy = pos.y / sector_height();
@@ -314,6 +315,52 @@ public:
         Sector_position spos = sector_index_to_sector_position(sector);
         return Position(spos.x * sector_width_, spos.y * sector_height_);
     }
+
+    void fill_sector_if(int sector, const Type& value, const Type& value_to_replace)
+    {
+        Position origin = sector_origin(sector);
+        for (int j = 0; j < sector_height_; ++j)
+        {
+            for (int i = 0; i < sector_width_; ++i)
+            {
+                Position pos = Position(i,j) + origin;
+                Type& datum = this->get(pos);
+                if (datum == value_to_replace)
+                    datum = value;
+            }
+        }
+    }
+
+    std::size_t count_in_sector(int sector, const Type& value) const
+    {
+        std::size_t res = 0;
+
+        Position origin = sector_origin(sector);
+        for (int j = 0; j < sector_height_; ++j)
+        {
+            for (int i = 0; i < sector_width_; ++i)
+            {
+                Position pos = Position(i,j) + origin;
+                const Type& datum = this->get(pos);
+                if (datum == value)
+                    ++res;
+            }
+        }
+
+        return res;
+    }
+
+protected:
+    int sector_width_ = -1;
+    int sector_height_ = -1;
+};
+
+class Map : public Grid_with_sectors<Square>
+{
+public:
+    Map(int width = 0, int height = 0)
+        : Grid_with_sectors<Square>(width, height)
+    {}
 
     void fill_from_stream(std::istream& stream)
     {
@@ -400,10 +447,6 @@ public:
         }
         return stream;
     }
-
-protected:
-    int sector_width_ = -1;
-    int sector_height_ = -1;
 };
 
 struct Turn_info
@@ -454,15 +497,83 @@ struct Turn_info
     }
 };
 
+class Game;
+class Player_info;
+
 struct Tool
 {
-    int cooldown = -1;
+    explicit Tool(Player_info& player, int total_cooldown)
+        : player_(&player), total_cooldown_(total_cooldown)
+    {}
+    bool is_available() const { return cooldown_ >= 0; }
+    bool is_ready() const { return cooldown_ == 0; }
+    std::size_t number_of_loads() const { return total_cooldown_ - cooldown_; }
+    std::size_t cooldown() const { return cooldown_; }
+    void set_cooldown(int cooldown) { cooldown_ = cooldown; }
+    const Player_info& player() const { assert(player_); return *player_; }
+    Player_info& player() { assert(player_); return *player_; }
 
-    bool is_available() const { return cooldown >= 0; }
-    bool is_ready() const { return cooldown == 0; }
+private:
+    Player_info* player_ = nullptr;
+    int total_cooldown_ = -1;
+    int cooldown_ = -1;
 };
 
-class Game;
+struct Sonar : public Tool
+{
+    inline static constexpr int total_cooldown() { return 4; }
+    inline static constexpr std::string_view result_not_available() { return "NA"; }
+    inline static constexpr std::string_view result_opponent_found() { return "Y"; }
+    inline static constexpr std::string_view result_opponent_not_found() { return "N"; }
+
+    explicit Sonar(Player_info& player) : Tool(player, total_cooldown()) {}
+
+    int requested_sector() const { return requested_sector_; }
+    void set_request(int sector)
+    {
+        requested_sector_ = sector;
+//        request_answer_ = false;
+    }
+    void reset_request() { set_request(-1); }
+    void manage_info(const std::string& sonar_result);
+
+private:
+    int requested_sector_ = -1;
+//    bool request_answer_ = false;
+};
+
+struct Torpedo : public Tool
+{
+public:
+    inline static constexpr int total_cooldown() { return 3; }
+
+    explicit Torpedo(Player_info& player) : Tool(player, total_cooldown()) {}
+
+private:
+    //TODO
+};
+
+struct Silence : public Tool
+{
+public:
+    inline static constexpr int total_cooldown() { return 6; }
+
+    explicit Silence(Player_info& player) : Tool(player, total_cooldown()) {}
+
+private:
+    //TODO
+};
+
+struct Mine : public Tool
+{
+public:
+    inline static constexpr int total_cooldown() { return 3; }
+
+    explicit Mine(Player_info& player) : Tool(player, total_cooldown()) {}
+
+private:
+    //TODO
+};
 
 class Player_info
 {
@@ -479,7 +590,7 @@ public:
     {}
 
     explicit Player_info(Game& game)
-        : game(&game)
+        : game_(&game)
     {}
 
     const Position& position() const { return status.position; }
@@ -496,13 +607,18 @@ public:
         history_status.push_back(status);
     }
 
+    const Game& game() const { assert(game_); return *game_; }
+    Game& game() { assert(game_); return *game_; }
+
     friend std::istream& operator>>(std::istream& stream, Player_info& info)
     {
         return stream >> info.id;
     }
 
+private:
+    Game* game_ = nullptr;
+
 public:
-    Game* game = nullptr;
     int id = -1;
     Status status;
     std::deque<Status> history_status;
@@ -511,7 +627,7 @@ public:
 class Opponent : public Player_info
 {
 public:
-    using Mark_map = Grid<int16_t>;
+    using Mark_map = Grid_with_sectors<int16_t>;
 
     explicit Opponent(Game& game)
         : Player_info(game)
@@ -522,8 +638,12 @@ public:
     inline bool sector_is_known() const { return sector >= 0; }
     void reset_sector() { sector = -1; }
 
+    bool silence_used = false;
+
     void treat_order(const std::string_view& order)
     {
+        silence_used = false;
+
         std::istringstream iss(std::string(order.begin(), order.end()));
         std::string command;
         iss >> command;
@@ -545,10 +665,11 @@ public:
         {
             update_pos_info_with_last_orientation_();
             relative_path.push_back(Undefined);
+            silence_used = true;
         }
     }
 
-    void update_data(const std::string& orders)
+    void update_data_with_orders(const std::string& orders)
     {
         std::size_t index = 0;
         std::size_t end_index = 0;
@@ -556,13 +677,18 @@ public:
         {
             end_index = orders.find('|', index);
             end_index = std::min(end_index, orders.length());
-            std::string_view order(&orders[index], end_index);
+            std::string_view order(&orders[index], end_index - index);
             if (!order.empty())
                 treat_order(order);
         }
     }
 
+    void update_data_with_sonar_result(int sector, bool found);
+
+    int most_marked_sector() const;
+
     const Mark_map& mark_map() const { return mark_map_; }
+    Mark_map& mark_map() { return mark_map_; }
 
 private:
     std::vector<Position> silence_destinations_(Position origin, Direction dir);
@@ -581,22 +707,26 @@ class Avatar : public Player_info
 public:
     struct Toolkit
     {
-        Tool torpedo;
-        Tool sonar;
-        Tool silence;
-        Tool mine;
+        Torpedo torpedo;
+        Sonar sonar;
+        Silence silence;
+        Mine mine;
+
+        explicit Toolkit(Player_info& player)
+            : torpedo(player), sonar(player), silence(player), mine(player)
+        {}
     };
 
 public:
     explicit Avatar(Game& game)
-        : Player_info(game)
+        : Player_info(game), toolkit(*this)
     {}
 
     Toolkit toolkit;
     const Tool& torpedo() const { return toolkit.torpedo; }
     Tool& torpedo() { return toolkit.torpedo; }
-    const Tool& sonar() const { return toolkit.sonar; }
-    Tool& sonar() { return toolkit.sonar; }
+    const Sonar& sonar() const { return toolkit.sonar; }
+    Sonar& sonar() { return toolkit.sonar; }
     const Tool& silence() const { return toolkit.silence; }
     Tool& silence() { return toolkit.silence; }
     const Tool& mine() const { return toolkit.mine; }
@@ -670,17 +800,25 @@ public:
     {
         trace();
         info() << turn_info << std::endl;
+        // Save player info
         avatar_.save_status();
+        opponent_.save_status();
+        // Update simple data
+        //-- Avatar
         avatar_.position() = Position(turn_info.x, turn_info.y);
         map_.get(avatar_.position()).set_visited(avatar_.id);
         avatar_.hp() = turn_info.myLife;
-        avatar_.torpedo().cooldown = turn_info.torpedoCooldown;
-        avatar_.sonar().cooldown = turn_info.sonarCooldown;
-        avatar_.silence().cooldown = turn_info.silenceCooldown;
-        avatar_.mine().cooldown = turn_info.mineCooldown;
-        opponent_.save_status();
+        avatar_.torpedo().set_cooldown(turn_info.torpedoCooldown);
+        avatar_.sonar().set_cooldown(turn_info.sonarCooldown);
+        avatar_.silence().set_cooldown(turn_info.silenceCooldown);
+        avatar_.mine().set_cooldown(turn_info.mineCooldown);
+        avatar_.sonar().set_cooldown(turn_info.sonarCooldown);
+        //-- Opponent
         opponent_.status.hp = turn_info.oppLife;
-        opponent_.update_data(turn_info.opponentOrders);
+        // Update complex data
+        avatar_.sonar().manage_info(turn_info.sonarResult);
+        opponent_.update_data_with_orders(turn_info.opponentOrders);
+        // Opponent status
         if (opponent_.sector_is_known())
             info() << "Opponent's sector: " << opponent_.sector << std::endl;
         if (opponent_.position_is_known())
@@ -722,8 +860,21 @@ public:
     void do_actions()
     {
         trace();
+        do_main_actions();
+        ostrm_ << " | MSG Turn " << turn_number_ << std::endl;
+    }
+
+    void do_main_actions()
+    {
+        if (opponent_.silence_used && avatar_.sonar().is_ready())
+        {
+            int sector = opponent_.most_marked_sector();
+            avatar_.sonar().set_request(sector);
+            ostrm_ << "SONAR " << sector << " | ";
+        }
+
         Direction move_dir = move_direction();
-        if (avatar_.silence().is_ready())
+        if (avatar_.silence().is_ready() && (turn_number() % 24 == 0))
         {
             unsigned distance = randint<unsigned>(0, 1);
             if (!dir_is_valid(move_dir))
@@ -731,19 +882,32 @@ public:
                 move_dir = North;
                 distance = 0;
             }
-            ostrm_ << silence_action(move_dir, distance) << std::endl;
+            ostrm_ << silence_action(move_dir, distance);
         }
         else if (dir_is_valid(move_dir))
         {
             info() << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
-            ostrm_ << move_action(move_dir) << " SILENCE" << std::endl;
+            ostrm_ << move_action(move_dir) << " " << load_submarine_tool();
         }
         else
         {
             info() << "ACTION: SURFACE" << std::endl;
-            ostrm_ << "SURFACE SILENCE" << std::endl;
+            ostrm_ << "SURFACE";
             map_.clear_visit(avatar_.id);
         }
+    }
+
+    std::string_view load_submarine_tool()
+    {
+        if (avatar_.silence().is_available() && !avatar_.silence().is_ready())
+            return "SILENCE";
+        else if (avatar_.sonar().is_available() && !avatar_.sonar().is_ready())
+            return "SONAR";
+        else if (avatar_.torpedo().is_available() && !avatar_.torpedo().is_ready())
+            return "TORPEDO";
+        else if (avatar_.mine().is_available() && !avatar_.mine().is_ready())
+            return "MINE";
+        return "";
     }
 
     // actions formatting:
@@ -775,8 +939,9 @@ public:
     // MISC
     const Game_info& game_info() const { return game_info_; }
     const Map& map() const { return map_; }
-    const Player_info& avatar() const { return avatar_; }
-    const Player_info& opponent() const { return opponent_; }
+    const Avatar& avatar() const { return avatar_; }
+    const Opponent& opponent() const { return opponent_; }
+    Opponent& opponent() { return opponent_; }
     int turn_number() const { return turn_number_; }
 
 private:
@@ -792,8 +957,9 @@ private:
 
 void Opponent::init()
 {
-    const Map& map = game->map();
+    const Map& map = game().map();
 
+    mark_map_.set_sector_size(map.sector_width(), map.sector_height());
     mark_map_.resize(map.width(), map.height(), 0);
     for (int j = 0; j < mark_map_.height(); ++j)
     {
@@ -807,7 +973,7 @@ void Opponent::init()
 
 std::vector<Position> Opponent::silence_destinations_(Position origin, Direction orientation)
 {
-    const Map& map = game->map();
+    const Map& map = game().map();
 
     Direction opposed_dir = opposed_direction(orientation);
     std::vector<Position> sdests;
@@ -837,8 +1003,8 @@ std::vector<Position> Opponent::silence_destinations_(Position origin, Direction
 void Opponent::update_pos_info_with_last_orientation_()
 {
     trace();
-    const Map& map = game->map();
-    int previous_turn_number = game->turn_number() - 1;
+    const Map& map = game().map();
+    int previous_turn_number = game().turn_number() - 1;
     Direction last_dir = relative_path.back();
 
     unsigned mark_count = 0;
@@ -854,7 +1020,7 @@ void Opponent::update_pos_info_with_last_orientation_()
                 std::vector<Position> sdests = silence_destinations_(pos, last_dir);
                 for (const Position& npos : sdests)
                 {
-                    next_mark_map.get(npos) = game->turn_number();
+                    next_mark_map.get(npos) = game().turn_number();
                     ++mark_count;
                     last_pos = npos;
                 }
@@ -877,8 +1043,8 @@ void Opponent::update_pos_info_with_last_orientation_()
 void Opponent::update_pos_info_with_sector_()
 {
     trace();
-    const Map& map = game->map();
-    int previous_turn_number = game->turn_number() - 1;
+    const Map& map = game().map();
+    int previous_turn_number = game().turn_number() - 1;
 
     Position origin = map.sector_origin(sector);
     unsigned mark_count = 0;
@@ -890,7 +1056,7 @@ void Opponent::update_pos_info_with_sector_()
             Position pos = Position(i,j) + origin;
             if (mark_map_.get(pos) == previous_turn_number)
             {
-                mark_map_.get(pos) = game->turn_number();
+                mark_map_.get(pos) = game().turn_number();
                 ++mark_count;
                 last_pos = pos;
             }
@@ -902,8 +1068,8 @@ void Opponent::update_pos_info_with_sector_()
 
 void Opponent::update_pos_info_with_move_dir_(Direction dir)
 {
-    const Map& map = game->map();
-    int previous_turn_number = game->turn_number() - 1;
+    const Map& map = game().map();
+    int previous_turn_number = game().turn_number() - 1;
 
     unsigned mark_count = 0;
     Position last_pos;
@@ -916,7 +1082,7 @@ void Opponent::update_pos_info_with_move_dir_(Direction dir)
             Position npos = pos.neighbour(dir);
             if (mark_map_.get(pos) == previous_turn_number && map.contains(npos) && map.get(npos).is_ocean())
             {
-                next_mark_map.get(npos) = game->turn_number();
+                next_mark_map.get(npos) = game().turn_number();
                 ++mark_count;
                 last_pos = npos;
             }
@@ -931,6 +1097,50 @@ void Opponent::update_pos_info_with_move_dir_(Direction dir)
         position() = last_pos;
         sector = map.position_to_sector_index(last_pos);
     }
+}
+
+void Sonar::manage_info(const std::string& sonar_result)
+{
+    if (sonar_result != result_not_available())
+    {
+        trace();
+        Game& game = player().game();
+        Opponent& opponent = game.opponent();
+        Opponent::Mark_map& mark_map = opponent.mark_map();
+        int previous_turn_number = game.turn_number() - 1;
+//        debug() << mark_map;
+
+        bool opponent_is_present = sonar_result == result_opponent_found();
+        if (opponent_is_present)
+        {
+            int sector_count = mark_map.number_of_sectors();
+            for (int sector = 1; sector <= sector_count; ++sector)
+            {
+                if (sector != requested_sector_)
+                    mark_map.fill_sector_if(sector, -1, previous_turn_number);
+            }
+        }
+        else
+            mark_map.fill_sector_if(requested_sector_, -1, previous_turn_number);
+//        debug() << mark_map;
+    }
+    reset_request();
+}
+
+int Opponent::most_marked_sector() const
+{
+    int res_sector = 1;
+    std::size_t count = mark_map_.count_in_sector(res_sector, game().turn_number());
+    for (int sector = 1; sector <= mark_map_.number_of_sectors(); ++sector)
+    {
+        std::size_t cnt = mark_map_.count_in_sector(sector, game().turn_number());
+        if (cnt > count)
+        {
+            count = cnt;
+            res_sector = sector;
+        }
+    }
+    return res_sector;
 }
 
 int main()
