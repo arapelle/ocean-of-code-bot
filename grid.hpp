@@ -24,7 +24,12 @@ public:
     inline Const_ref get(const Position& pos) const { return get(pos.x, pos.y); }
     inline Ref get(const Position& pos) { return get(pos.x, pos.y); }
 
-    void clear() { width_ = 0; height_ = 0; data_.clear(); }
+    void clear()
+    {
+        width_ = 0;
+        height_ = 0;
+        data_.clear();
+    }
 
     void resize(int width, int height, const Type& value = Type())
     {
@@ -38,6 +43,16 @@ public:
     bool contains(const Position& pos) const
     {
         return pos.x >= 0 && pos.x < width_ && pos.y >= 0 && pos.y < height_;
+    }
+
+    std::size_t count(const Type& value) const
+    {
+        std::size_t res = 0;
+        for (const auto& row : data_)
+            for (const auto& element : row)
+                if (element == value)
+                    ++res;
+        return res;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, const Grid<Type>& grid)
