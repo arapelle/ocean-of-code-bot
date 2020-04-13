@@ -28,4 +28,6 @@ public:
     Vec2 neighbour(Direction dir) const;
 
     friend std::ostream& operator<<(std::ostream& stream, const Vec2& vec);
+
+    std::string to_string() const;
 };

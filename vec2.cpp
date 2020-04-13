@@ -1,5 +1,6 @@
 #include "vec2.hpp"
 #include "log.hpp"
+#include <sstream>
 
 Vec2::Vec2(int x, int y)
     : x(x), y(y)
@@ -61,4 +62,11 @@ Vec2 Vec2::neighbour(Direction dir) const { Vec2 vec(*this); vec.move(dir); retu
 std::ostream& operator<<(std::ostream& stream, const Vec2& vec)
 {
     return stream << vec.x << " " << vec.y;
+}
+
+std::string Vec2::to_string() const
+{
+    std::ostringstream stream;
+    stream << *this;
+    return stream.str();
 }
