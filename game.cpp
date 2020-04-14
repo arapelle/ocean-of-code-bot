@@ -3,6 +3,7 @@
 #include "log.hpp"
 #include <algorithm>
 #include <map>
+#include <chrono>
 
 void Game::init()
 {
@@ -117,12 +118,15 @@ void Game::do_actions()
 {
     trace();
     do_main_actions();
-    ostrm_ << " | MSG Turn " << turn_number_ << std::endl;
+    debug() << "Marks:\n" << opponent_.mark_map() << std::endl;
+    std::size_t nb_pos = opponent_.number_of_possible_positions();
+    ostrm_ << " | MSG #" << turn_number_ << ", %" << nb_pos << " ("<< opponent_.position() << ")";
+    ostrm_ << std::endl;
 }
 
 void Game::do_main_actions()
 {
-    if (opponent_.silence_used && avatar_.sonar().is_ready())
+    if (avatar_.sonar().is_ready() && (opponent_.silence_used || opponent_.number_of_possible_positions() >= 25))
     {
         int sector = opponent_.most_marked_sector();
         avatar_.sonar().set_request(sector);
@@ -180,6 +184,7 @@ void Game::play_turn()
 {
     Turn_info turn_info;
     istrm_ >> turn_info;
+    auto start_time = std::chrono::steady_clock::now();
 
     info() << "---------------------------------------------" << std::endl;
     info() << "TURN NUMBER: " << turn_number_ << std::endl << std::flush;
@@ -188,4 +193,7 @@ void Game::play_turn()
     do_actions();
 
     ++turn_number_;
+    auto end_time = std::chrono::steady_clock::now();
+    std::chrono::duration<double, std::milli> turn_duration = end_time - start_time;
+    info() << "Turn Duration: " << turn_duration.count() << "ms" << std::endl;
 }

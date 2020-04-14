@@ -1,6 +1,7 @@
 #include "opponent.hpp"
 #include "game.hpp"
 #include "map.hpp"
+#include <algorithm>
 
 void Opponent::treat_order(const std::string_view& order)
 {
@@ -63,7 +64,7 @@ void Opponent::init()
     }
 }
 
-std::vector<Position> Opponent::silence_destinations_(Position origin, Direction orientation)
+std::vector<Position> Opponent::silence_destinations_(Position origin, Direction orientation, const std::vector<Position>& prpos) const
 {
     const Map& map = game().map();
 
@@ -75,11 +76,12 @@ std::vector<Position> Opponent::silence_destinations_(Position origin, Direction
         Direction dir = Direction(i);
         if (dir != opposed_dir)
         {
-            Position npos = origin;
+            Position rnpos(0,0);
             for (unsigned j = 1; j <= 4; ++j)
             {
-                npos.move(dir);
-                if (!map.contains(npos))
+                rnpos.move(dir);
+                Position npos = rnpos + origin;
+                if (!map.contains(npos) || std::find(prpos.begin(), prpos.end(), rnpos) != prpos.end())
                     break;
                 const Square& square = map.get(npos);
                 if (square.is_ocean() && !square.is_visited(id))
@@ -98,6 +100,7 @@ void Opponent::update_pos_info_with_last_orientation_()
     const Map& map = game().map();
     int previous_turn_number = game().turn_number() - 1;
     Direction last_dir = relative_path.back();
+    std::vector<Position> prpos = previous_relative_positions();
 
     unsigned mark_count = 0;
     Position last_pos;
@@ -109,7 +112,7 @@ void Opponent::update_pos_info_with_last_orientation_()
             Position pos(i,j);
             if (mark_map_.get(pos) == previous_turn_number)
             {
-                std::vector<Position> sdests = silence_destinations_(pos, last_dir);
+                std::vector<Position> sdests = silence_destinations_(pos, last_dir, prpos);
                 for (const Position& npos : sdests)
                 {
                     next_mark_map.get(npos) = game().turn_number();
@@ -206,3 +209,24 @@ int Opponent::most_marked_sector() const
     }
     return res_sector;
 }
+
+std::size_t Opponent::number_of_possible_positions() const
+{
+    return mark_map_.count(game().turn_number());
+}
+
+std::vector<Position> Opponent::previous_relative_positions() const
+{
+    std::vector<Position> vpos;
+    Position pos(0,0);
+    for (auto iter = relative_path.rbegin(), end_iter = relative_path.rend(); iter != end_iter; ++iter)
+    {
+        Direction dir = *iter;
+        if (!dir_is_valid(dir))
+            break;
+        pos.move(opposed_direction(dir));
+        vpos.push_back(pos);
+    }
+    return vpos;
+}
+

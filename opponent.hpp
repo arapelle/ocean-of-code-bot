@@ -27,14 +27,17 @@ public:
 
     int most_marked_sector() const;
 
+    std::size_t number_of_possible_positions() const;
+
     const Mark_map& mark_map() const { return mark_map_; }
     Mark_map& mark_map() { return mark_map_; }
 
 private:
-    std::vector<Position> silence_destinations_(Position origin, Direction dir);
+    std::vector<Position> silence_destinations_(Position origin, Direction dir, const std::vector<Position>& prpos) const;
     void update_pos_info_with_last_orientation_();
     void update_pos_info_with_sector_();
     void update_pos_info_with_move_dir_(Direction dir);
+    std::vector<Position> previous_relative_positions() const;
 
 public:
     int sector = -1;
