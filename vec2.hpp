@@ -1,6 +1,7 @@
 #pragma once
 
 #include "direction.hpp"
+#include <vector>
 
 class Vec2
 {
@@ -23,9 +24,15 @@ public:
 
     bool operator!=(const Vec2& rfs) const;
 
+    bool operator<(const Vec2& rfs) const;
+
     Vec2& move(Direction dir);
 
     Vec2 neighbour(Direction dir) const;
+
+    std::vector<Vec2> circle_area(unsigned radius) const;
+
+    std::vector<Vec2> square_area(unsigned radius) const;
 
     friend std::ostream& operator<<(std::ostream& stream, const Vec2& vec);
 
