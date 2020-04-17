@@ -3,13 +3,13 @@
 #include "player.hpp"
 #include "grid_with_sectors.hpp"
 
-class Opponent : public Player_info
+class Opponent : public Player
 {
 public:
     using Mark_map = Grid_with_sectors<int16_t>;
 
     explicit Opponent(Game& game)
-        : Player_info(game)
+        : Player(game)
     {}
 
     void init();
@@ -18,12 +18,15 @@ public:
     void reset_sector() { sector = -1; }
 
     bool silence_used = false;
+    bool torpedo_used = false;
 
     void treat_order(const std::string_view& order);
 
     void update_data_with_orders(const std::string& orders);
 
     void update_data_with_sonar_result(int sector, bool found);
+
+    void update_position();
 
     int most_marked_sector() const;
 
@@ -32,7 +35,10 @@ public:
     const Mark_map& mark_map() const { return mark_map_; }
     Mark_map& mark_map() { return mark_map_; }
 
+    Position center_of_possible_positions() const;
+
 private:
+    void update_pos_info_with_torpedo_(int x, int y);
     std::vector<Position> silence_destinations_(Position origin, Direction dir, const std::vector<Position>& prpos) const;
     void update_pos_info_with_last_orientation_();
     void update_pos_info_with_sector_();

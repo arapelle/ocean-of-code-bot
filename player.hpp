@@ -6,7 +6,7 @@
 
 class Game;
 
-class Player_info
+class Player
 {
 public:
     inline static constexpr std::size_t max_history_size = 5;
@@ -17,12 +17,8 @@ public:
         int hp = -1;
     };
 
-    Player_info()
-    {}
-
-    explicit Player_info(Game& game)
-        : game_(&game)
-    {}
+    Player();
+    explicit Player(Game& game);
 
     const Position& position() const { return status.position; }
     Position& position() { return status.position; }
@@ -31,20 +27,15 @@ public:
     int& hp() { return status.hp; }
 
     const Status& previous_status() const { return history_status.back(); }
-    void save_status()
-    {
-        while (history_status.size() >= max_history_size)
-            history_status.pop_front();
-        history_status.push_back(status);
-    }
+    void save_status();
 
     const Game& game() const { assert(game_); return *game_; }
     Game& game() { assert(game_); return *game_; }
 
-    friend std::istream& operator>>(std::istream& stream, Player_info& info)
-    {
-        return stream >> info.id;
-    }
+    std::vector<Position> sensible_squares() const;
+    std::vector<Position> hitable_squares_by_torpedo() const;
+
+    friend std::istream& operator>>(std::istream& stream, Player& info);
 
 private:
     Game* game_ = nullptr;

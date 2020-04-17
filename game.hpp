@@ -35,6 +35,8 @@ public:
 
     // ia:
     Direction move_direction();
+    Direction exploration_move_direction();
+    Direction move_to_opponent_direction();
 
     void do_actions();
 
@@ -53,6 +55,7 @@ public:
     // MISC
     const Game_info& game_info() const { return game_info_; }
     const Map& map() const { return map_; }
+    Map& map() { return map_; }
     const Avatar& avatar() const { return avatar_; }
     const Opponent& opponent() const { return opponent_; }
     Opponent& opponent() { return opponent_; }

@@ -74,18 +74,33 @@ void Game::update_data(const Turn_info& turn_info)
     //-- Opponent
     opponent_.status.hp = turn_info.oppLife;
     // Update complex data
-    avatar_.sonar().manage_info(turn_info.sonarResult);
+    avatar_.sonar().update_info(turn_info.sonarResult);
+    avatar_.torpedo().update_info();
     opponent_.update_data_with_orders(turn_info.opponentOrders);
+    opponent_.update_position();
     // Opponent status
     if (opponent_.sector_is_known())
         info() << "Opponent's sector: " << opponent_.sector << std::endl;
     if (opponent_.position_is_known())
         info() << "Opponent's pos: " << opponent_.position() << std::endl;
-    info() << "Opponent's path: " << opponent_.relative_path.size() << std::endl;
+//    info() << "Opponent's path: " << opponent_.relative_path.size() << std::endl;
 }
 
 Direction Game::move_direction()
 {
+    trace();
+    Direction dir = Bad;
+    if (opponent_.position_is_known())
+        dir = move_to_opponent_direction();
+    if (dir == Bad)
+        dir = exploration_move_direction();
+
+    return dir;
+}
+
+Direction Game::exploration_move_direction()
+{
+    trace();
     Position pos = avatar_.position();
     std::map<unsigned, std::vector<Direction>, std::greater<unsigned>> mdirs;
     for (unsigned i = 0; i < number_of_directions(); ++i)
@@ -114,28 +129,66 @@ Direction Game::move_direction()
     return Bad;
 }
 
+Direction Game::move_to_opponent_direction()
+{
+    return map_.dir_to(avatar_.id, avatar_.position(), opponent_.position());
+}
+
 void Game::do_actions()
 {
     trace();
     do_main_actions();
     debug() << "Marks:\n" << opponent_.mark_map() << std::endl;
     std::size_t nb_pos = opponent_.number_of_possible_positions();
-    ostrm_ << " | MSG #" << turn_number_ << ", %" << nb_pos << " ("<< opponent_.position() << ")";
+    ostrm_ << " | MSG F#" << turn_number_ << ", %" << nb_pos << " ("<< opponent_.position() << ")";
     ostrm_ << std::endl;
 }
 
 void Game::do_main_actions()
 {
-    if (avatar_.sonar().is_ready() && (opponent_.silence_used || opponent_.number_of_possible_positions() >= 25))
+    trace();
+    debug() << __LINE__ << std::endl;
+    if (avatar_.sonar().is_ready() && (opponent_.silence_used /*|| opponent_.number_of_possible_positions() >= 50*/))
     {
         int sector = opponent_.most_marked_sector();
         avatar_.sonar().set_request(sector);
         ostrm_ << "SONAR " << sector << " | ";
     }
-
-    Direction move_dir = move_direction();
-    if (avatar_.silence().is_ready() && (turn_number() % 24 == 0))
+    debug() << "before torpedo" << std::endl;
+    if (avatar_.torpedo().is_ready())
     {
+        debug() << "hitable_squares_by_torpedo" << std::endl;
+        std::vector<Position> h_squares = avatar_.hitable_squares_by_torpedo();
+        debug() << "sensible_squares" << std::endl;
+        std::vector<Position> s_squares = opponent_.sensible_squares();
+        if (s_squares.empty())
+        {
+            Position center_pos = opponent_.center_of_possible_positions();
+            if (map_.contains(center_pos))
+                s_squares.push_back(center_pos);
+        }
+        std::sort(h_squares.begin(), h_squares.end());
+        std::sort(s_squares.begin(), s_squares.end());
+        std::vector<Position> target_squares;
+        debug() << "before set_intersections" << std::endl;
+        std::set_intersection(s_squares.begin(), s_squares.end(), h_squares.begin(), h_squares.end(), std::back_inserter(target_squares));
+        if (!target_squares.empty())
+        {
+            Position targeted_pos = target_squares.front();
+            if (opponent_.position_is_known()
+                && std::find(target_squares.begin(), target_squares.end(), opponent_.position()) != target_squares.end())
+                targeted_pos = opponent_.position();
+            avatar_.torpedo().fire_to(targeted_pos);
+            debug() << "TORPEDO " << targeted_pos << " | ";
+            ostrm_ << "TORPEDO " << targeted_pos << " | ";
+        }
+    }
+
+    debug() << __LINE__ << std::endl;
+    Direction move_dir = move_direction();
+    if (avatar_.silence().is_ready() && ( avatar_.has_lost_life() || ( avatar_.torpedo().is_ready() ) ))
+    {
+        debug() << __LINE__ << std::endl;
         unsigned distance = randint<unsigned>(0, 1);
         if (!dir_is_valid(move_dir))
         {
@@ -146,11 +199,13 @@ void Game::do_main_actions()
     }
     else if (dir_is_valid(move_dir))
     {
+        debug() << __LINE__ << std::endl;
         info() << "ACTION: move_dir: " << dir_to_string(move_dir) << std::endl;
         ostrm_ << move_action(move_dir) << " " << load_submarine_tool();
     }
     else
     {
+        debug() << __LINE__ << std::endl;
         info() << "ACTION: SURFACE" << std::endl;
         ostrm_ << "SURFACE";
         map_.clear_visit(avatar_.id);
@@ -159,12 +214,13 @@ void Game::do_main_actions()
 
 std::string_view Game::load_submarine_tool()
 {
-    if (avatar_.silence().is_available() && !avatar_.silence().is_ready())
-        return "SILENCE";
-    else if (avatar_.sonar().is_available() && !avatar_.sonar().is_ready())
-        return "SONAR";
-    else if (avatar_.torpedo().is_available() && !avatar_.torpedo().is_ready())
+    if (avatar_.torpedo().is_available() && !avatar_.torpedo().is_ready())
         return "TORPEDO";
+    else if (avatar_.sonar().is_available() && !avatar_.sonar().is_ready()
+             && ( opponent_.number_of_possible_positions() >= 50 || avatar_.silence().is_available()))
+        return "SONAR";
+    else if (avatar_.silence().is_available() && !avatar_.silence().is_ready())
+        return "SILENCE";
     else if (avatar_.mine().is_available() && !avatar_.mine().is_ready())
         return "MINE";
     return "";
