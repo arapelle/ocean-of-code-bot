@@ -3,18 +3,18 @@
 std::ostream& operator<<(std::ostream& stream, const Turn_info& info)
 {
     stream << "TURN INFO:\n{" << std::endl;
-    stream << "pos: (" << info.x << " " << info.y << "), " << "HP: " << info.myLife << ",\n";
+    stream << "pos: (" << info.x << " " << info.y << ") | " << "HP: " << info.myLife << " | ";
     if (info.torpedoCooldown >= 0)
-        stream << "torpedo_cooldown: " << info.torpedoCooldown << "\n";
+        stream << "torpedo_cooldown: " << info.torpedoCooldown << " | ";
     if (info.sonarCooldown >= 0)
     {
-        stream << "sonar_cooldown: " << info.sonarCooldown << "\n";
-        stream << "sonar: " << info.sonarResult << "\n";
+        stream << "sonar_cooldown: " << info.sonarCooldown << " | ";
+        stream << "sonar: " << info.sonarResult << " | ";
     }
     if (info.silenceCooldown >= 0)
-        stream << "silence_cooldown: " << info.silenceCooldown << "\n";
+        stream << "silence_cooldown: " << info.silenceCooldown << " | ";
     if (info.mineCooldown >= 0)
-        stream << "mine_cooldown: " << info.mineCooldown << "\n";
+        stream << "mine_cooldown: " << info.mineCooldown << " | ";
     stream << "Opponent's HP: " << info.oppLife << "\n"
            << "Opponent's Orders: " << info.opponentOrders << "\n}";
     return stream;
